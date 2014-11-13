@@ -92,22 +92,31 @@ def average_form_factors(qz_lists, F_lists)
     bin_size = 0.0005
     avg_qz, avg_F = [], []
     err_qz, err_F = [], []
-    tmp_qz_list = []
-    tmp_F_list = []
-    while not qz_lists[0]:
-        base_qz = qz_lists[0][0]
-        for qzvalues, Fvalues in zip(qz_lists, F_lists):
-            while True:
-                qz = qzvalues.pop(0)
-                F = Fvalues.pop(0)
-                if (qz <= base_qz + 0.5*bin_size) and (qz >= base_qz - 0.5*bin_size): 
-                    tmp_qz_list.append(qz)
-                    tmp_F_list.append(F)
-                    break
-        avg_qz.append(np.mean(tmp_qz_list))
-        err_qz.append(np.std(tmp_qz_list, ddof=1, dtype=np.float64))
-        avg_F.append(np.mean(tmp_F_list)))
-        err_F.append(np.std(tmp_F_list, ddof=1, dtype=np.float64))
+
+    while True:
+        # If any of the lists is empty, no more averaing is required
+        for qzvalues in qz_lists:
+            if len(qzvalues) == 0:
+                break
+        
+        while True:
+            tmp_qz_list, tmp_F_list = [], []
+            base_qz = qz_lists[0][0]
+            for qzvalues, Fvalues in zip(qz_lists, F_lists):
+                while (qzvalues[0] < base_qz - 0.5*bin_size):
+                    del(qzvalues[0])        
+                if (qzvalues[0] > base_qz + 0.5*bin_size):
+                    base_qz = qzvalues[0]
+                else:
+                    tmp_qz_list.append(qzvalues.pop(0))
+                    tmp_F_list.append(Fvalues.pop(0))
+            if len(tmp_qz_list) > 1:        
+                avg_qz.append(np.mean(tmp_qz_list))
+                err_qz.append(np.std(tmp_qz_list, ddof=1, dtype=np.float64))
+                avg_F.append(np.mean(tmp_F_list)))
+                err_F.append(np.std(tmp_F_list, ddof=1, dtype=np.float64))
+            else:
+                print('No avaraging was taken at %g', base_qz)
     return avg_qz, err_qz, avg_F, err_F
    
    
