@@ -3,6 +3,8 @@ import math
 import sys
 
 wavelength = 1.18 # X-ray wavelength in Angstrom
+execfile('parameters.py')
+large_value = 10000
 
 def read_frm_dot_dat(filename):
     pixel = []; scaling = []; cz = []; qz = []; sigma_scaling = []; sigma_cz = [];
@@ -69,15 +71,20 @@ def apply_absorption_correction(qz, scale):
         scale[i] = Ac * scale[i]
     
 
-def remove_errorneous_data_points(qz, scale):
-    """Remove certain errorneous data points. An errorneous
-    data point is defined by a scaling factor that looks like
-    ***e13.
+def remove_errorneous_data_points(qz_lists, scale_lists):
+    """Remove certain errorneous data points.
     
-    qz : list
-    scale : list
+    qz_lists: list of lists
+    scale_lists : list of lists
     """
-    pass
+    global large_value
+    for qzvalues, scales in zip(qz_lists, scale_lists):
+        for i in range(len(scales)):
+            tmp1 = scales.pop(0)
+            tmp2 = qzvalues.pop(0)
+            if abs(tmp1) < large_value:
+                scales.append(tmp1)
+                qzvalues.append(tmp2)
     
     
 def write_to_file(qz_values, form_factors, errors, filename):
@@ -214,11 +221,11 @@ def scaling_to_form_factors(all_qz, all_scale):
 if __name__ == '__main__':
     filenames = get_filenames_from_CL() 
     # grab absorption length, sample thickness, and bin size
-    execfile('parameters.py')
     tmp = raw_input('Enter the X-ray wavelength (default: 1.18) : ')
     if tmp != '':
         wavelength = float(tmp)    
     all_qz, all_scale = get_all_qz_and_scale(filenames)
+    remove_errorneous_data_points(all_qz, all_scale)
     scaling_to_form_factors(all_qz, all_scale)
     qz, sigma_qz, F, sigma_F = average_form_factors(all_qz, all_scale)
     write_to_file(qz, F, sigma_F, "averaged_form_factors.smp")
