@@ -2,7 +2,7 @@ import numpy as np
 import math
 import sys
 
-wavelength = 1.18
+wavelength = 1.18 # X-ray wavelength in Angstrom
 
 def read_frm_dot_dat(filename):
     pixel = []; scaling = []; cz = []; qz = []; sigma_scaling = []; sigma_cz = [];
@@ -57,8 +57,8 @@ def apply_absorption_correction(qz, scale):
     qz : list
     scale : list
     """
-    t = 10
-    mu = 2600
+    global t
+    global mu
     global wavelength
     for i in xrange(len(scale)):
         #a = wavelength * qz[i] / 4 / math.pi
@@ -104,7 +104,38 @@ x 0.333 67.0 91.0 0 7.875 0.0 9.0 0.0 \\
     
 def smooth_form_factor(f):
     pass
+
+
+def normalize_to_each_other(F):
+    for j in range(1, len(F[0])):
+        num, denom = 0, 0        
+        for i in range(len(F)):
+            num += F[i][0]*F[i][j]
+            denom += F[i][j]*F[i][j]
+        a = num / denom
+        for i in range(len(F)):
+            F[i][j] = a * F[i][j]
     
+    
+def create_binned_data(qz_lists, F_lists):
+    global bin_size
+    qz_bin, F_bin = [], []
+    largest_qz_value = final_qz_value(qz_lists)
+    number_of_bins = int(round(largest_qz_value/bin_size)) + 1    
+    for i in range(number_of_bins):
+        tmp_qz_list, tmp_F_list = [], []
+        current_bin = 0.001 * i
+        for qzvalues, Fvalues in zip(qz_lists, F_lists):
+            if within_current_bin(current_bin, qzvalues[0]):
+                tmp_qz_list.append(qzvalues.pop(0))
+                tmp_F_list.append(Fvalues.pop(0))                
+        # Do not add if the temporary lists are not fully filled
+        # for the current bin                    
+        if len(tmp_qz_list) == len(qz_lists):        
+            qz_bin.append(tmp_qz_list)
+            F_bin.append(tmp_F_list)
+    return qz_bin, F_bin   
+               
 
 def average_form_factors(qz_lists, F_lists):
     """Average multiple sets of form factors. Need at least two 
@@ -112,6 +143,9 @@ def average_form_factors(qz_lists, F_lists):
     
     qz_lists : list of lists
     F_lists : list of lists
+    
+    Each list must be in an ascending order, which is the default format
+    in NFIT frm.dat.
     """ 
     if len(qz_lists) < 2:
         raise TypeError('Need more than one form factor set for averaging')
@@ -120,68 +154,71 @@ def average_form_factors(qz_lists, F_lists):
     for qzvalues, Fvalues in zip(qz_lists, F_lists):
         if len(qzvalues) != len(Fvalues):
             raise TypeError('Length of each qz and F data set must agree') 
-    bin_size = 0.0005
-    avg_qz, avg_F = [], []
-    err_qz, err_F = [], []
-    
-    base_qz = qz_lists[0][0]
-    while True:
-        # If any of the lists is empty, no more averaing is required
-        if len(qz_lists[0]) == 0:
-            break
-                    
-        tmp_qz_list, tmp_F_list = [], []            
-        for qzvalues, Fvalues in zip(qz_lists, F_lists):
-            # If the current qz value is too small, discard it
-            while (qzvalues[0] < base_qz - 0.5*bin_size):
-                del(qzvalues[0])  
-                del(Fvalues[0])
-            # If the current qz value is too large, update base_qz
-            # and start over with the updated base_qz     
-            if (qzvalues[0] > base_qz + 0.5*bin_size):
-                base_qz = qzvalues[0]
-                break
-            else:
-                tmp_qz_list.append(qzvalues.pop(0))
-                tmp_F_list.append(Fvalues.pop(0))
-                
-        # Do not average if the temporary lists are not fully filled
-        # for this iteration                    
-        if len(tmp_qz_list) == len(qz_lists):        
-            avg_qz.append(np.mean(tmp_qz_list))
-            err_qz.append(np.std(tmp_qz_list, ddof=1, dtype=np.float64))
-            avg_F.append(np.mean(tmp_F_list))
-            err_F.append(np.std(tmp_F_list, ddof=1, dtype=np.float64))
-            if len(qz_lists[0]) > 0:
-                base_qz = qz_lists[0][0]
-        else:
-            # If the temporary lists are not fully filled, base_qz
-            # was already set to a larger value
-            print('No avaraging was taken')
-    
+   
+    qz_bin, F_bin = create_binned_data(qz_lists, F_lists)
+    normalize_to_each_other(F_bin)
+    qz_bin = np.array(qz_bin)
+    F_bin = np.array(F_bin)
+    avg_qz = np.mean(qz_bin, axis=1)
+    err_qz = np.std(qz_bin, axis=1, ddof=1, dtype=np.float64)
+    avg_F = np.mean(F_bin, axis=1)    
+    err_F = np.std(F_bin, axis=1, ddof=1, dtype=np.float64)   
+         
     return avg_qz, err_qz, avg_F, err_F
    
-   
-if __name__ == '__main__':
-    filenames = []
-    all_qz = []
-    all_scale = []
+
+def within_current_bin(cbin, value):
+    global bin_size
+    if (value >= cbin - 0.5*bin_size) and (value < cbin + 0.5*bin_size):
+        return True
+    else:
+        return False
+
+
+def final_qz_value(qzlists):
+    tmp = 10000 # some big value
+    for qzvalues in qzlists:
+        if qzvalues[-1] < tmp:
+            tmp = qzvalues[-1]    
+    return tmp
     
-    if len(sys.argv) < 4:
+
+def get_filenames_from_CL():
+    filenames = []
+    if len(sys.argv) < 3:
         print("Need at least two filenames")
     else:
-        for i in xrange(2,len(sys.argv)):
+        print("\nInput filenames are:")
+        for i in xrange(1, len(sys.argv)):
             filenames.append(sys.argv[i])  
-    
-    tmp = raw_input('Enter the X-ray wavelength (default: 1.18) : ')
-    if tmp != '':
-        wavelength = float(tmp)
-    
+            print(sys.argv[i])
+        print("")
+    return filenames
+
+
+def get_all_qz_and_scale(filenames):
+    all_qz = []
+    all_scale = []
     for f in filenames:
         px, scale, cz, qz, sig_scale, sig_cz = read_frm_dot_dat(f)
         all_qz.append(qz)
-        all_scale.append(scale)
+        all_scale.append(scale)  
+    return all_qz, all_scale  
+
+
+def scaling_to_form_factors(all_qz, all_scale):
     for qz, scale in zip(all_qz, all_scale):
         convert_scaling_to_form_factors(qz, scale)
+        
+               
+if __name__ == '__main__':
+    filenames = get_filenames_from_CL() 
+    # grab absorption length, sample thickness, and bin size
+    execfile('parameters.py')
+    tmp = raw_input('Enter the X-ray wavelength (default: 1.18) : ')
+    if tmp != '':
+        wavelength = float(tmp)    
+    all_qz, all_scale = get_all_qz_and_scale(filenames)
+    scaling_to_form_factors(all_qz, all_scale)
     qz, sigma_qz, F, sigma_F = average_form_factors(all_qz, all_scale)
     write_to_file(qz, F, sigma_F, "averaged_form_factors.smp")
